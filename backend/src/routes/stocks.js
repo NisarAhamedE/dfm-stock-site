@@ -1,323 +1,212 @@
 const express = require('express');
-const { body, query, param, validationResult } = require('express-validator');
-const Stock = require('../models/Stock');
-const auth = require('../middleware/auth');
-
 const router = express.Router();
+const YahooFinanceService = require('../services/yahooFinance');
+const CacheService = require('../services/cacheService');
 
-// Validation middleware
-const validateRequest = (req, res, next) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      success: false,
-      message: 'Validation error',
-      errors: errors.array()
-    });
-  }
-  next();
-};
+const yahooFinance = new YahooFinanceService();
+const cache = new CacheService();
 
-// @route   GET /api/stocks
-// @desc    Get all stocks with pagination and filtering
-// @access  Public
-router.get('/', [
-  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-  query('sort').optional().isIn(['symbol', 'name', 'currentPrice', 'changePercent', 'volume', 'marketCap']).withMessage('Invalid sort field'),
-  query('order').optional().isIn(['asc', 'desc']).withMessage('Order must be asc or desc'),
-  query('sector').optional().isString().trim().notEmpty().withMessage('Sector must be a non-empty string'),
-  validateRequest
-], async (req, res) => {
+// Get all DFM stocks
+router.get('/', async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 20,
-      sort = 'symbol',
-      order = 'asc',
-      sector,
-      search
-    } = req.query;
+    // Check cache first
+    const cachedData = await cache.get('all_stocks');
+    if (cachedData) {
+      return res.json({
+        success: true,
+        data: cachedData,
+        message: 'Stocks retrieved from cache',
+        timestamp: new Date().toISOString(),
+        cached: true
+      });
+    }
 
-    // Build query
-    let query = { isActive: true };
+    // Fetch data from Yahoo Finance
+    const stocksData = await yahooFinance.getAllDFMStocks();
     
-    if (sector) {
-      query.sector = { $regex: sector, $options: 'i' };
-    }
-
-    if (search) {
-      query.$or = [
-        { symbol: { $regex: search, $options: 'i' } },
-        { name: { $regex: search, $options: 'i' } },
-        { arabicName: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Calculate pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const sortOrder = order === 'desc' ? -1 : 1;
-
-    // Execute query
-    const stocks = await Stock.find(query)
-      .sort({ [sort]: sortOrder })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .select('-__v');
-
-    // Get total count for pagination
-    const total = await Stock.countDocuments(query);
-
-    // Calculate pagination info
-    const totalPages = Math.ceil(total / parseInt(limit));
-    const hasNextPage = parseInt(page) < totalPages;
-    const hasPrevPage = parseInt(page) > 1;
-
+    // Cache the data for 5 minutes
+    await cache.set('all_stocks', stocksData, 300);
+    
     res.json({
       success: true,
-      data: stocks,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages,
-        totalItems: total,
-        itemsPerPage: parseInt(limit),
-        hasNextPage,
-        hasPrevPage
-      }
+      data: stocksData,
+      message: 'Stocks retrieved successfully',
+      timestamp: new Date().toISOString(),
+      cached: false
     });
-
   } catch (error) {
     console.error('Error fetching stocks:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching stocks'
+      error: {
+        code: 'FETCH_ERROR',
+        message: 'Failed to fetch stock data',
+        details: error.message
+      },
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// @route   GET /api/stocks/search
-// @desc    Search stocks by symbol, name, or sector
-// @access  Public
-router.get('/search', [
-  query('q').notEmpty().withMessage('Search query is required'),
-  query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
-  validateRequest
-], async (req, res) => {
+// Search stocks
+router.get('/search', async (req, res) => {
   try {
-    const { q, limit = 10 } = req.query;
+    const { q } = req.query;
+    
+    if (!q || q.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'MISSING_QUERY',
+          message: 'Search query is required'
+        },
+        timestamp: new Date().toISOString()
+      });
+    }
 
-    const stocks = await Stock.search(q)
-      .limit(parseInt(limit))
-      .select('symbol name arabicName sector currentPrice change changePercent volume')
-      .sort({ symbol: 1 });
+    const query = q.trim();
 
+    // Check cache first
+    const cacheKey = `search_${query.toLowerCase()}`;
+    const cachedData = await cache.get(cacheKey);
+    if (cachedData) {
+      return res.json({
+        success: true,
+        data: cachedData,
+        message: 'Search results from cache',
+        timestamp: new Date().toISOString(),
+        cached: true
+      });
+    }
+
+    // Search Yahoo Finance
+    const searchResults = await yahooFinance.searchStocks(query);
+    
+    // Cache the results for 10 minutes
+    await cache.set(cacheKey, searchResults, 600);
+    
     res.json({
       success: true,
-      data: stocks,
-      query: q,
-      count: stocks.length
+      data: searchResults,
+      message: 'Search completed successfully',
+      timestamp: new Date().toISOString(),
+      cached: false
     });
-
   } catch (error) {
     console.error('Error searching stocks:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while searching stocks'
+      error: {
+        code: 'SEARCH_ERROR',
+        message: 'Failed to search stocks',
+        details: error.message
+      },
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// @route   GET /api/stocks/:symbol
-// @desc    Get specific stock details
-// @access  Public
-router.get('/:symbol', [
-  param('symbol').isString().trim().notEmpty().withMessage('Stock symbol is required'),
-  validateRequest
-], async (req, res) => {
+// Get single stock
+router.get('/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
-
-    const stock = await Stock.findOne({
-      symbol: symbol.toUpperCase(),
-      isActive: true
-    });
-
-    if (!stock) {
-      return res.status(404).json({
+    
+    if (!symbol || symbol.trim().length === 0) {
+      return res.status(400).json({
         success: false,
-        message: 'Stock not found'
+        error: {
+          code: 'MISSING_SYMBOL',
+          message: 'Stock symbol is required'
+        },
+        timestamp: new Date().toISOString()
       });
     }
 
+    const stockSymbol = symbol.trim().toUpperCase();
+
+    // Check cache first
+    const cacheKey = `stock_${stockSymbol}`;
+    const cachedData = await cache.get(cacheKey);
+    if (cachedData) {
+      return res.json({
+        success: true,
+        data: cachedData,
+        message: 'Stock data from cache',
+        timestamp: new Date().toISOString(),
+        cached: true
+      });
+    }
+
+    // Fetch from Yahoo Finance
+    const stockData = await yahooFinance.getStockQuote(stockSymbol);
+    
+    // Cache the data for 5 minutes
+    await cache.set(cacheKey, stockData, 300);
+    
     res.json({
       success: true,
-      data: stock
+      data: stockData,
+      message: 'Stock data retrieved successfully',
+      timestamp: new Date().toISOString(),
+      cached: false
     });
-
   } catch (error) {
     console.error('Error fetching stock:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching stock details'
+      error: {
+        code: 'STOCK_FETCH_ERROR',
+        message: 'Failed to fetch stock data',
+        details: error.message
+      },
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// @route   GET /api/stocks/sectors/list
-// @desc    Get list of all sectors
-// @access  Public
-router.get('/sectors/list', async (req, res) => {
+// Get cache statistics
+router.get('/cache/stats', async (req, res) => {
   try {
-    const sectors = await Stock.distinct('sector', { isActive: true });
-    
+    const stats = cache.getStats();
     res.json({
       success: true,
-      data: sectors.sort()
+      data: stats,
+      message: 'Cache statistics retrieved',
+      timestamp: new Date().toISOString()
     });
-
   } catch (error) {
-    console.error('Error fetching sectors:', error);
+    console.error('Error getting cache stats:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching sectors'
+      error: {
+        code: 'CACHE_STATS_ERROR',
+        message: 'Failed to get cache statistics',
+        details: error.message
+      },
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// @route   GET /api/stocks/sectors/:sector
-// @desc    Get stocks by sector
-// @access  Public
-router.get('/sectors/:sector', [
-  param('sector').isString().trim().notEmpty().withMessage('Sector is required'),
-  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-  validateRequest
-], async (req, res) => {
+// Clear cache
+router.delete('/cache/clear', async (req, res) => {
   try {
-    const { sector } = req.params;
-    const { page = 1, limit = 20 } = req.query;
-
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    const stocks = await Stock.find({
-      sector: { $regex: sector, $options: 'i' },
-      isActive: true
-    })
-      .sort({ symbol: 1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    const total = await Stock.countDocuments({
-      sector: { $regex: sector, $options: 'i' },
-      isActive: true
-    });
-
-    const totalPages = Math.ceil(total / parseInt(limit));
-
+    cache.clear();
     res.json({
       success: true,
-      data: stocks,
-      sector,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages,
-        totalItems: total,
-        itemsPerPage: parseInt(limit)
-      }
+      message: 'Cache cleared successfully',
+      timestamp: new Date().toISOString()
     });
-
   } catch (error) {
-    console.error('Error fetching stocks by sector:', error);
+    console.error('Error clearing cache:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching stocks by sector'
-    });
-  }
-});
-
-// @route   GET /api/stocks/top/gainers
-// @desc    Get top gaining stocks
-// @access  Public
-router.get('/top/gainers', [
-  query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
-  validateRequest
-], async (req, res) => {
-  try {
-    const { limit = 10 } = req.query;
-
-    const stocks = await Stock.find({ isActive: true })
-      .sort({ changePercent: -1 })
-      .limit(parseInt(limit))
-      .select('symbol name currentPrice change changePercent volume sector');
-
-    res.json({
-      success: true,
-      data: stocks
-    });
-
-  } catch (error) {
-    console.error('Error fetching top gainers:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching top gainers'
-    });
-  }
-});
-
-// @route   GET /api/stocks/top/losers
-// @desc    Get top losing stocks
-// @access  Public
-router.get('/top/losers', [
-  query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
-  validateRequest
-], async (req, res) => {
-  try {
-    const { limit = 10 } = req.query;
-
-    const stocks = await Stock.find({ isActive: true })
-      .sort({ changePercent: 1 })
-      .limit(parseInt(limit))
-      .select('symbol name currentPrice change changePercent volume sector');
-
-    res.json({
-      success: true,
-      data: stocks
-    });
-
-  } catch (error) {
-    console.error('Error fetching top losers:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching top losers'
-    });
-  }
-});
-
-// @route   GET /api/stocks/top/volume
-// @desc    Get stocks with highest volume
-// @access  Public
-router.get('/top/volume', [
-  query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
-  validateRequest
-], async (req, res) => {
-  try {
-    const { limit = 10 } = req.query;
-
-    const stocks = await Stock.find({ isActive: true })
-      .sort({ volume: -1 })
-      .limit(parseInt(limit))
-      .select('symbol name currentPrice change changePercent volume sector');
-
-    res.json({
-      success: true,
-      data: stocks
-    });
-
-  } catch (error) {
-    console.error('Error fetching top volume stocks:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching top volume stocks'
+      error: {
+        code: 'CACHE_CLEAR_ERROR',
+        message: 'Failed to clear cache',
+        details: error.message
+      },
+      timestamp: new Date().toISOString()
     });
   }
 });

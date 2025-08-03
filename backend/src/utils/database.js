@@ -7,12 +7,9 @@ const connectDB = async () => {
     const conn = await mongoose.connect(mongoURI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
     });
 
-    console.log(`📦 MongoDB Connected: ${conn.connection.host}`);
+    console.log(`📊 MongoDB Connected: ${conn.connection.host}`);
     
     // Handle connection events
     mongoose.connection.on('error', (err) => {
@@ -21,10 +18,6 @@ const connectDB = async () => {
 
     mongoose.connection.on('disconnected', () => {
       console.log('MongoDB disconnected');
-    });
-
-    mongoose.connection.on('reconnected', () => {
-      console.log('MongoDB reconnected');
     });
 
     // Graceful shutdown
