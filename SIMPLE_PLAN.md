@@ -57,6 +57,8 @@
 - **Framework:** Express.js
 - **Database:** MongoDB with Mongoose
 - **Validation:** express-validator
+- **Caching:** Redis for API response caching
+- **External API:** Yahoo Finance API integration
 
 ### 2. Simplified Database Design
 
@@ -221,48 +223,42 @@ src/
 - [ ] Responsive design
 - [ ] Deploy to hosting platform
 
-### 7. Sample Data Structure
+### 7. Yahoo Finance API Integration
 
-#### 7.1 Stock Data Example
+#### 7.1 DFM Stock Symbols
 ```javascript
-const sampleStocks = [
-  {
-    symbol: "EMAAR",
-    name: "Emaar Properties PJSC",
-    sector: "Real Estate",
-    currentPrice: 4.25,
-    previousClose: 4.17,
-    change: 0.08,
-    changePercent: 1.92,
-    volume: 1200000,
-    marketCap: 15200000000,
-    lastUpdated: "2024-01-01T10:00:00.000Z"
-  },
-  {
-    symbol: "DU",
-    name: "Emirates Integrated Telecommunications Company PJSC",
-    sector: "Telecommunications",
-    currentPrice: 2.85,
-    previousClose: 2.89,
-    change: -0.04,
-    changePercent: -1.38,
-    volume: 890000,
-    marketCap: 8700000000,
-    lastUpdated: "2024-01-01T10:00:00.000Z"
-  },
-  {
-    symbol: "ENBD",
-    name: "Emirates NBD Bank PJSC",
-    sector: "Banking",
-    currentPrice: 12.50,
-    previousClose: 12.40,
-    change: 0.10,
-    changePercent: 0.81,
-    volume: 2100000,
-    marketCap: 25400000000,
-    lastUpdated: "2024-01-01T10:00:00.000Z"
-  }
+const dfmStocks = [
+  'EMAAR', 'DU', 'ENBD', 'DEWA', 'SALIK', 'AMLAK', 
+  'ARTC', 'DAMAC', 'DFM', 'GULFNAV', 'SHUAA', 'TECOM', 'UPP'
 ];
+```
+
+#### 7.2 Yahoo Finance API Endpoints
+```javascript
+// Get single stock data
+GET https://query1.finance.yahoo.com/v8/finance/chart/EMAAR.AD
+
+// Get multiple stocks data
+GET https://query1.finance.yahoo.com/v8/finance/chart/EMAAR.AD,DU.AD,ENBD.AD
+
+// Search stocks
+GET https://query1.finance.yahoo.com/v1/finance/search?q=EMAAR
+```
+
+#### 7.3 Real-time Data Structure
+```javascript
+{
+  symbol: "EMAAR",
+  name: "Emaar Properties PJSC",
+  currentPrice: 4.25,
+  previousClose: 4.17,
+  change: 0.08,
+  changePercent: 1.92,
+  volume: 1200000,
+  marketCap: 15200000000,
+  lastUpdated: "2024-01-01T10:00:00.000Z",
+  currency: "AED"
+}
 ```
 
 ### 8. Success Criteria

@@ -27,12 +27,13 @@ Nisar
 - **Framework**: Node.js with Express.js
 - **Database**: MongoDB for flexible data storage
 - **API**: RESTful API with JSON responses
-- **Data Fetching**: Integration with DFM API or web scraping
+- **Data Fetching**: Yahoo Finance API integration
+- **Caching**: Redis for API response caching
 
 ### Data Sources
-- **Primary**: DFM official API (if available)
-- **Secondary**: Web scraping from DFM website
-- **Fallback**: Manual data entry for initial setup
+- **Primary**: Yahoo Finance API for real-time stock data
+- **Secondary**: DFM official API (if available)
+- **Fallback**: Web scraping from DFM website
 
 ## Project Structure
 
@@ -78,7 +79,8 @@ dfm_stock_site/
 ### Phase 2: Core Features (Week 2)
 3. **Backend Development**
    - Create RESTful endpoints for stock data
-   - Implement data fetching from DFM sources
+   - Implement Yahoo Finance API integration
+   - Set up data caching with Redis
    - Set up basic error handling
 
 4. **Frontend Development**
