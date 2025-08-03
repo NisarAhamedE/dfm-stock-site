@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "github": {
-      "command": "github-mcp-custom",
-      "args": [],
+      "command": "npx",
+      "args": ["github-mcp-custom"],
       "env": {
         "GITHUB_TOKEN": "${env:GITHUB_TOKEN}"
       }
